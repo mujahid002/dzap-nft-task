@@ -1,4 +1,4 @@
-const { ethers, run } = require("hardhat");
+const { ethers, run, upgrades } = require("hardhat");
 
 async function main() {
   // DZapNfts
@@ -15,12 +15,24 @@ async function main() {
   // DZapStaking
   const DZapStaking = await hre.ethers.getContractFactory("DZapStaking");
   console.log("Deploying DZapStaking Contract...");
-  const dZapStaking = await DZapStaking.deploy(dZapNftsAddress, {
-    gasPrice: 33000000000,
-  });
-  await dZapStaking.waitForDeployment();
-  const dZapStakingAddress = await dZapStaking.getAddress();
+  const dZapStaking = await upgrades.deployProxy(
+    DZapStaking,
+    [stakingTokenContractAddress],
+    {
+      initializer: "initialize",
+    }
+  );
+  await dZapStaking.deployed();
+  const dZapStakingAddress = dZapStaking.address;
   console.log("DZapStaking Contract Address:", dZapStakingAddress);
+  //   const DZapStaking = await hre.ethers.getContractFactory("DZapStaking");
+  //   console.log("Deploying DZapStaking Contract...");
+  //   const dZapStaking = await DZapStaking.deploy(dZapNftsAddress, {
+  //     gasPrice: 33000000000,
+  //   });
+  //   await dZapStaking.waitForDeployment();
+  //   const dZapStakingAddress = await dZapStaking.getAddress();
+  //   console.log("DZapStaking Contract Address:", dZapStakingAddress);
   console.log("----------------------------------------------------------");
 
   // DZapRewardToken
