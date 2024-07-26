@@ -4,13 +4,13 @@ pragma solidity ^0.8.20;
 import {ERC721Enumerable, ERC721} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 /// @custom:security-contact mujahidshaik2002@gmail.com
-contract MyDZapNfts is ERC721Enumerable {
+contract DZapNfts is ERC721Enumerable {
     uint256 private s_dZapId;
 
     constructor() ERC721("DZapNFT", "DZT"){
         s_dZapId = 10;
         for (uint256 i = 0; i < 10; ++i) {
-            _safeMint(msg.sender, i);
+            _safeMint(_msgSender(), i);
         }
     }
 
