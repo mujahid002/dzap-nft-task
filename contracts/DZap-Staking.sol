@@ -35,21 +35,21 @@ contract DZapStaking is
 
     /// VARIABLES
     /// @notice ERC721 token that users can stake
-    IERC721 public s_stakingTokenContract;
+    IERC721 private s_stakingTokenContract;
     /// @notice ERC20 token used for rewards
-    address public s_rewardTokenContractAddress;
+    address private s_rewardTokenContractAddress;
     /// @notice Reward rate in ERC20 tokens per block
-    uint256 public s_rewardRatePerBlock = 10 * 10**18;
+    uint256 private s_rewardRatePerBlock = 10;
     /// @notice Unbonding period in blocks before an unstaked NFT can be withdrawn
-    uint48 public s_unbondingPeriod = 3 days;
+    uint48 private s_unbondingPeriod = 3 days;
     /// @notice Delay period in blocks before rewards can be claimed again
-    uint48 public s_rewardClaimDelay = 1 days;
+    uint48 private s_rewardClaimDelay = 1 days;
 
     /// MAPPINGS
     /// @notice Mapping to store staking information for each user and their NFTs
-    mapping(address => mapping(uint256 => StakeInfo)) public s_stakes;
+    mapping(address => mapping(uint256 => StakeInfo)) private s_stakes;
     /// @notice Mapping to store a list of staked NFTs for each user
-    mapping(address => uint256[]) public s_userStakes;
+    mapping(address => uint256[]) private s_userStakes;
 
     /// EVENTS
     /// @notice Events to log staking, unstaking, and reward claiming activities
@@ -63,14 +63,9 @@ contract DZapStaking is
     }
 
     /// @notice Initializes the contract with the given parameters
-    /// @param _rewardTokenContractAddress The ERC20 token used for rewards
     /// @param _stakingTokenContract The ERC721 token that users can stake
-    function initialize(
-        IERC721 _stakingTokenContract,
-        address _rewardTokenContractAddress
-    ) public initializer {
+    function initialize(IERC721 _stakingTokenContract) public initializer {
         s_stakingTokenContract = _stakingTokenContract;
-        s_rewardTokenContractAddress = _rewardTokenContractAddress;
         __Pausable_init();
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
@@ -84,6 +79,8 @@ contract DZapStaking is
     function stake(uint256[] calldata tokenIds) public whenNotPaused {
         for (uint256 i = 0; i < tokenIds.length; ++i) {
             uint256 tokenId = tokenIds[i];
+            if (s_stakingTokenContract.getApproved(tokenId) != address(this))
+                revert DZapStaking__NftNotAllowedByOwner();
             s_stakingTokenContract.transferFrom(
                 _msgSender(),
                 address(this),
@@ -178,22 +175,21 @@ contract DZapStaking is
         }
     }
 
-    /// @notice Calculates the rewards earned by a user for a specific staked NFT
-    /// @param user The address of the user
-    /// @param tokenId The ID of the staked NFT
-    /// @return The amount of rewards earned
-    function earned(address user, uint256 tokenId)
+    /// @notice Allows the owner to update the staking token contract
+    /// @param newStakingTokenContract The new staking token contract address
+    function updateStakingTokenContract(address newStakingTokenContract)
         public
-        view
-        returns (uint256)
+        onlyOwner
     {
-        StakeInfo storage stakeInfo = s_stakes[user][tokenId];
-        if (stakeInfo.stakedAt == 0 || stakeInfo.unbonding)
-            return stakeInfo.rewardDebt;
-        return
-            (uint48(block.number) - stakeInfo.stakedAt) *
-            s_rewardRatePerBlock +
-            stakeInfo.rewardDebt;
+        s_stakingTokenContract = IERC721(newStakingTokenContract);
+    }
+
+    /// @notice Allows the owner to update the reward token contract address
+    /// @param newRewardTokenContractAddress The new reward token contract address
+    function updateRewardTokenContractAddress(
+        address newRewardTokenContractAddress
+    ) public onlyOwner {
+        s_rewardTokenContractAddress = newRewardTokenContractAddress;
     }
 
     /// @notice Allows the owner to update the reward rate per block
@@ -223,8 +219,7 @@ contract DZapStaking is
         (bool checkCall, ) = s_rewardTokenContractAddress.call(
             abi.encodeWithSignature("pause()")
         );
-        if (!checkCall)
-            revert DZapStaking__UnableToCallRewardTokenContract();
+        if (!checkCall) revert DZapStaking__UnableToCallRewardTokenContract();
     }
 
     /// @notice Allows the owner to unpause the staking functionality
@@ -233,8 +228,7 @@ contract DZapStaking is
         (bool checkCall, ) = s_rewardTokenContractAddress.call(
             abi.encodeWithSignature("unpause()")
         );
-        if (!checkCall)
-            revert DZapStaking__UnableToCallRewardTokenContract();
+        if (!checkCall) revert DZapStaking__UnableToCallRewardTokenContract();
     }
 
     /// @dev Authorizes contract upgrades, restricted to the contract owner
@@ -248,7 +242,7 @@ contract DZapStaking is
     /// @dev Updates the reward for a specific NFT
     /// @param user The address of the user
     /// @param tokenId The ID of the NFT to update the reward for
-    function _updateReward(address user, uint256 tokenId) private {
+    function _updateReward(address user, uint256 tokenId) internal {
         if (
             s_stakes[user][tokenId].stakedAt > 0 &&
             !s_stakes[user][tokenId].unbonding
@@ -270,5 +264,74 @@ contract DZapStaking is
                 break;
             }
         }
+    }
+
+    /*****************************
+            VIEW FUNCTIONS
+    ******************************/
+
+    /// @notice Calculates the rewards earned by a user for a specific staked NFT
+    /// @param user The address of the user
+    /// @param tokenId The ID of the staked NFT
+    /// @return The amount of rewards earned
+    function earned(address user, uint256 tokenId)
+        public
+        view
+        returns (uint256)
+    {
+        StakeInfo storage stakeInfo = s_stakes[user][tokenId];
+        if (stakeInfo.stakedAt == 0 || stakeInfo.unbonding) {
+            return stakeInfo.rewardDebt;
+        }
+        return
+            (uint256((uint48(block.number) - stakeInfo.stakedAt)) *
+                s_rewardRatePerBlock) /
+            10**18 +
+            stakeInfo.rewardDebt;
+    }
+
+    /// @notice Returns the address of the ERC721 token contract used for staking
+    /// @return The address of the ERC721 token contract
+    function getStakingTokenContract() public view returns (IERC721) {
+        return s_stakingTokenContract;
+    }
+
+    /// @notice Returns the address of the ERC20 token contract used for rewards
+    /// @return The address of the ERC20 token contract
+    function getRewardTokenContractAddress() public view returns (address) {
+        return s_rewardTokenContractAddress;
+    }
+
+    /// @notice Returns the reward rate in ERC20 tokens per block
+    /// @return The reward rate in ERC20 tokens per block
+    function getRewardRatePerBlock() public view returns (uint256) {
+        return s_rewardRatePerBlock;
+    }
+
+    /// @notice Returns the unbonding period in blocks before an unstaked NFT can be withdrawn
+    /// @return The unbonding period in blocks
+    function getUnbondingPeriod() public view returns (uint48) {
+        return s_unbondingPeriod;
+    }
+
+    /// @notice Returns the delay period in blocks before rewards can be claimed again
+    /// @return The reward claim delay period in blocks
+    function getRewardClaimDelay() public view returns (uint48) {
+        return s_rewardClaimDelay;
+    }
+
+    /// @notice Returns staking information for a specific user and NFT
+    /// @param user The address of the user
+    /// @param tokenId The ID of the staked NFT
+    /// @return StakeInfo struct containing staking details
+    function getStakeInfo(address user, uint256 tokenId) external view returns (StakeInfo memory) {
+        return s_stakes[user][tokenId];
+    }
+
+    /// @notice Returns a list of staked NFTs for a specific user
+    /// @param user The address of the user
+    /// @return An array of token IDs representing the user's staked NFTs
+    function getUserStakes(address user) external view returns (uint256[] memory) {
+        return s_userStakes[user];
     }
 }
