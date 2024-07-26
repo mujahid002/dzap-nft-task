@@ -6,7 +6,7 @@ import {ERC20, ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/extensio
 error RewardToken__Unauthorized();
 
 /// @custom:security-contact mujahidshaik2002@gmail.com
-contract RewardToken is ERC20, ERC20Pausable {
+contract DZapRewardToken is ERC20, ERC20Pausable {
     address private immutable s_dZapStakingContractAddress;
 
     constructor(address _dZapStakingNftContract)
@@ -15,7 +15,7 @@ contract RewardToken is ERC20, ERC20Pausable {
         s_dZapStakingContractAddress = _dZapStakingNftContract;
     }
 
-     modifier onlyDZapStakingContract() {
+    modifier onlyDZapStakingContract() {
         if (_msgSender() != s_dZapStakingContractAddress)
             revert RewardToken__Unauthorized();
         _;
@@ -29,21 +29,17 @@ contract RewardToken is ERC20, ERC20Pausable {
         _unpause();
     }
 
-    function mint(address to, uint256 amount)
-        public
-        onlyDZapStakingContract
-    {
+    function mint(address to, uint256 amount) public onlyDZapStakingContract {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount)
-        public
-        onlyDZapStakingContract
-    {
+    function burn(address from, uint256 amount) public onlyDZapStakingContract {
         _burn(from, amount);
     }
 
-    // The following functions are overrides required by Solidity.
+    function getDZapStakingContractAddress() public view returns (address) {
+        return s_dZapStakingContractAddress;
+    }
 
     function _update(
         address from,
