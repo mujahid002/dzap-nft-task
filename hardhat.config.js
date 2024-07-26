@@ -6,13 +6,6 @@ require("@openzeppelin/hardhat-upgrades");
 module.exports = {
   solidity: "0.8.20",
   networks: {
-    sepolia: {
-      url: process.env.SEPOLIA_RPC_URL,
-      accounts: [process.env.PRIVATE_KEY],
-      chainId: 11155111,
-      timeout: 10000,
-      confirmations: 2,
-    },
     polygonAmoy: {
       url: process.env.AMOY_RPC_URL,
       accounts: [process.env.PRIVATE_KEY],
