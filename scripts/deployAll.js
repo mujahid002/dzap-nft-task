@@ -12,28 +12,22 @@ async function main() {
   console.log("DZapNfts Contract Address:", dZapNftsAddress);
   console.log("----------------------------------------------------------");
 
+  // const dZapNftsAddress = "0x05203d191dda7dba3a3130eb2b3cd85593f7fc07";
   // DZapStaking
   const DZapStaking = await hre.ethers.getContractFactory("DZapStaking");
   console.log("Deploying DZapStaking Contract...");
   const dZapStaking = await upgrades.deployProxy(
     DZapStaking,
-    [stakingTokenContractAddress],
+    [dZapNftsAddress, 86400, 1200, 10],
     {
       initializer: "initialize",
       kind: "uups",
     }
   );
-  await dZapStaking.deployed();
-  const dZapStakingAddress = dZapStaking.address;
+  await dZapStaking.waitForDeployment();
+  const dZapStakingAddress = await dZapStaking.getAddress();
   console.log("DZapStaking Contract Address:", dZapStakingAddress);
-  //   const DZapStaking = await hre.ethers.getContractFactory("DZapStaking");
-  //   console.log("Deploying DZapStaking Contract...");
-  //   const dZapStaking = await DZapStaking.deploy(dZapNftsAddress, {
-  //     gasPrice: 33000000000,
-  //   });
-  //   await dZapStaking.waitForDeployment();
-  //   const dZapStakingAddress = await dZapStaking.getAddress();
-  //   console.log("DZapStaking Contract Address:", dZapStakingAddress);
+
   console.log("----------------------------------------------------------");
 
   // DZapRewardToken
@@ -54,7 +48,7 @@ async function main() {
   console.log(
     "Updating DZapRewardToken Contract Address in DZapStaking Contract..."
   );
-  const dZapStakingContractInstance = await dZapStaking.attach(
+  const dZapStakingContractInstance = await DZapStaking.attach(
     dZapStakingAddress
   );
 
@@ -78,7 +72,7 @@ async function main() {
   console.log("Verifying DZapStaking...");
   await run("verify:verify", {
     address: dZapStakingAddress,
-    constructorArguments: [dZapNftsAddress],
+    constructorArguments: [],
   });
   console.log("----------------------------------------------------------");
 
@@ -100,4 +94,4 @@ main()
 
 // CLI command to deploy all contracts at once
 // yarn hardhat run scripts/deployAll.js --network polygonAmoy
-// yarn hardhat verify --network polygonAmoy DEPLOYED_CONTRACT_ADDRESS
+// yarn hardhat verify --network polygonAmoy waitForDeployment_CONTRACT_ADDRESS
