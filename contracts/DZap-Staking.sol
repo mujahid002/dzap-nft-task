@@ -9,6 +9,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// Custom errors for more efficient error handling
+error DZapStaking__InvalidNftOwner();
 error DZapStaking__NftNotAllowedByOwner();
 error DZapStaking__NftNotStaked();
 error DZapStaking__NftAlreadyUnStaked();
@@ -101,6 +102,8 @@ contract DZapStaking is
 
         for (uint256 i = 0; i < length; ++i) {
             uint256 tokenId = tokenIds[i];
+            if (s_stakingTokenContract.ownerOf(tokenId) != _msgSender())
+                revert DZapStaking__InvalidNftOwner();
             if (s_stakingTokenContract.getApproved(tokenId) != address(this))
                 revert DZapStaking__NftNotAllowedByOwner();
             s_stakingTokenContract.transferFrom(
