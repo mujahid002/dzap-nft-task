@@ -15,6 +15,7 @@ error DZapStaking__NftAlreadyUnStaked();
 error DZapStaking__NftNotUnStaked();
 error DZapStaking__UnbondingPeriodNotOver();
 error DZapStaking__AlreadyRewardsClaimed();
+error DZapStaking__InvalidRewardTokenContract();
 error DZapStaking__UnableToCallRewardTokenContract();
 
 /// @title DZapStaking
@@ -91,7 +92,7 @@ contract DZapStaking is
             uint256 tokenId = tokenIds[i];
             if (s_stakingTokenContract.getApproved(tokenId) != address(this))
                 revert DZapStaking__NftNotAllowedByOwner();
-            s_stakingTokenContract.safeTransferFrom(
+            s_stakingTokenContract.transferFrom(
                 _msgSender(),
                 address(this),
                 tokenId
@@ -151,7 +152,7 @@ contract DZapStaking is
 
             delete s_stakes[_msgSender()][tokenId];
             _removeTokenId(_msgSender(), tokenId);
-            s_stakingTokenContract.safeTransferFrom(
+            s_stakingTokenContract.transferFrom(
                 address(this),
                 _msgSender(),
                 tokenId
@@ -166,6 +167,8 @@ contract DZapStaking is
         whenNotPaused
         nonReentrant
     {
+        if (s_rewardTokenContractAddress == address(0))
+            revert DZapStaking__InvalidRewardTokenContract();
         uint256 length = tokenIds.length;
 
         uint256 totalReward = 0;
