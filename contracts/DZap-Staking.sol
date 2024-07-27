@@ -3,15 +3,18 @@ pragma solidity ^0.8.20;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// Custom errors for more efficient error handling
 error DZapStaking__NftNotAllowedByOwner();
 error DZapStaking__NftNotStaked();
+error DZapStaking__NftAlreadyUnStaked();
 error DZapStaking__NftNotUnStaked();
 error DZapStaking__UnbondingPeriodNotOver();
+error DZapStaking__AlreadyRewardsClaimed();
 error DZapStaking__UnableToCallRewardTokenContract();
 
 /// @title DZapStaking
@@ -19,31 +22,31 @@ error DZapStaking__UnableToCallRewardTokenContract();
 contract DZapStaking is
     Initializable,
     UUPSUpgradeable,
-    OwnableUpgradeable,
-    PausableUpgradeable
+    Ownable2StepUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable
 {
     /*****************************
             STATE VARIABLES
     ******************************/
-    /// @notice Struct to store staking information for each NFT
-    struct StakeInfo {
-        uint256 rewardDebt; // Accumulated reward up to the last update
-        uint48 stakedAt; // Block number when the NFT was staked
-        uint48 unbondingAt; // Block number when the NFT started unbonding
-        bool unbonding; // Flag indicating if the NFT is in the unbonding process
-    }
 
     /// VARIABLES
     /// @notice ERC721 token that users can stake
     IERC721 private s_stakingTokenContract;
     /// @notice ERC20 token used for rewards
     address private s_rewardTokenContractAddress;
+    /// @notice Unbonding period in blocks before an unstaked NFT can be withdrawn
+    uint256 private s_unbondingPeriod = 86400;
+    /// @notice Delay period in blocks before rewards can be claimed again
+    uint256 private s_rewardClaimDelay = 1200; //i.e 20 minutes
     /// @notice Reward rate in ERC20 tokens per block
     uint256 private s_rewardRatePerBlock = 10;
-    /// @notice Unbonding period in blocks before an unstaked NFT can be withdrawn
-    uint48 private s_unbondingPeriod = 3 days;
-    /// @notice Delay period in blocks before rewards can be claimed again
-    uint48 private s_rewardClaimDelay = 1 days;
+
+    /// @notice Struct to store staking information for each NFT
+    struct StakeInfo {
+        uint48 stakedSince;
+        uint48 stakedUntil;
+    }
 
     /// MAPPINGS
     /// @notice Mapping to store staking information for each user and their NFTs
@@ -67,6 +70,7 @@ contract DZapStaking is
     function initialize(IERC721 _stakingTokenContract) public initializer {
         s_stakingTokenContract = _stakingTokenContract;
         __Pausable_init();
+        __ReentrancyGuard_init();
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
     }
@@ -76,22 +80,26 @@ contract DZapStaking is
     ******************************/
     /// @notice Allows users to stake multiple NFTs
     /// @param tokenIds The IDs of the NFTs to stake
-    function stake(uint256[] calldata tokenIds) public whenNotPaused {
-        for (uint256 i = 0; i < tokenIds.length; ++i) {
+    function stake(uint256[] calldata tokenIds)
+        public
+        whenNotPaused
+        nonReentrant
+    {
+        uint256 length = tokenIds.length;
+
+        for (uint256 i = 0; i < length; ++i) {
             uint256 tokenId = tokenIds[i];
             if (s_stakingTokenContract.getApproved(tokenId) != address(this))
                 revert DZapStaking__NftNotAllowedByOwner();
-            s_stakingTokenContract.transferFrom(
+            s_stakingTokenContract.safeTransferFrom(
                 _msgSender(),
                 address(this),
                 tokenId
             );
 
             s_stakes[_msgSender()][tokenId] = StakeInfo({
-                stakedAt: uint48(block.number),
-                unbondingAt: 0,
-                rewardDebt: 0,
-                unbonding: false
+                stakedSince: uint48(block.number),
+                stakedUntil: 0
             });
 
             s_userStakes[_msgSender()].push(tokenId);
@@ -101,39 +109,49 @@ contract DZapStaking is
 
     /// @notice Allows users to unstake specific NFTs, initiating the unbonding process
     /// @param tokenIds The IDs of the NFTs to unstake
-    function unstake(uint256[] calldata tokenIds) public {
-        for (uint256 i = 0; i < tokenIds.length; ++i) {
+    function unstake(uint256[] calldata tokenIds)
+        public
+        whenNotPaused
+        nonReentrant
+    {
+        uint256 length = tokenIds.length;
+        for (uint256 i = 0; i < length; ++i) {
             uint256 tokenId = tokenIds[i];
-            _updateReward(_msgSender(), tokenId);
 
             StakeInfo storage stakeInfo = s_stakes[_msgSender()][tokenId];
 
-            if (stakeInfo.stakedAt <= 0) revert DZapStaking__NftNotStaked();
+            if (stakeInfo.stakedSince <= 0) revert DZapStaking__NftNotStaked();
+            if (stakeInfo.stakedUntil != 0)
+                revert DZapStaking__NftAlreadyUnStaked();
 
-            stakeInfo.unbondingAt = uint48(block.number);
-            stakeInfo.unbonding = true;
+            stakeInfo.stakedUntil = uint48(block.number);
             emit Unstaked(_msgSender(), tokenId);
         }
     }
 
     /// @notice Allows users to withdraw NFTs after the unbonding period has passed
     /// @param tokenIds The IDs of the NFTs to withdraw
-    function withdraw(uint256[] calldata tokenIds) public {
-        for (uint256 i = 0; i < tokenIds.length; ++i) {
+    function withdraw(uint256[] calldata tokenIds)
+        public
+        whenNotPaused
+        nonReentrant
+    {
+        uint256 length = tokenIds.length;
+
+        for (uint256 i = 0; i < length; ++i) {
             uint256 tokenId = tokenIds[i];
-            _updateReward(_msgSender(), tokenId);
 
             StakeInfo storage stakeInfo = s_stakes[_msgSender()][tokenId];
-            if (stakeInfo.unbondingAt <= 0)
+            if (stakeInfo.stakedUntil <= 0)
                 revert DZapStaking__NftNotUnStaked();
 
             if (
-                uint48(block.number) < stakeInfo.unbondingAt + s_unbondingPeriod
+                uint48(block.number) < stakeInfo.stakedUntil + s_unbondingPeriod
             ) revert DZapStaking__UnbondingPeriodNotOver();
 
             delete s_stakes[_msgSender()][tokenId];
             _removeTokenId(_msgSender(), tokenId);
-            s_stakingTokenContract.transferFrom(
+            s_stakingTokenContract.safeTransferFrom(
                 address(this),
                 _msgSender(),
                 tokenId
@@ -143,24 +161,33 @@ contract DZapStaking is
 
     /// @notice Allows users to claim accumulated rewards for their staked NFTs
     /// @param tokenIds The IDs of the NFTs to claim rewards for
-    function claimReward(uint256[] calldata tokenIds) public {
+    function claimReward(uint256[] calldata tokenIds)
+        public
+        whenNotPaused
+        nonReentrant
+    {
+        uint256 length = tokenIds.length;
+
         uint256 totalReward = 0;
-        for (uint256 i = 0; i < tokenIds.length; ++i) {
+        for (uint256 i = 0; i < length; ++i) {
             uint256 tokenId = tokenIds[i];
-            _updateReward(_msgSender(), tokenId);
 
             StakeInfo storage stakeInfo = s_stakes[_msgSender()][tokenId];
-            if (stakeInfo.stakedAt <= 0) revert DZapStaking__NftNotStaked();
+            if (stakeInfo.stakedSince <= 0) revert DZapStaking__NftNotStaked();
 
             if (
-                uint48(block.number) >= stakeInfo.stakedAt + s_rewardClaimDelay
+                stakeInfo.stakedUntil != 0 &&
+                stakeInfo.stakedSince >= stakeInfo.stakedUntil
+            ) revert DZapStaking__AlreadyRewardsClaimed();
+            if (
+                uint48(block.number) >=
+                stakeInfo.stakedSince + s_rewardClaimDelay
             ) {
                 totalReward += earned(_msgSender(), tokenId);
-                stakeInfo.rewardDebt = 0;
-                stakeInfo.stakedAt = uint48(block.number);
+                stakeInfo.stakedSince = uint48(block.number);
             }
         }
-        if (totalReward > 0) {
+        if (totalReward != 0) {
             (bool checkMint, ) = s_rewardTokenContractAddress.call(
                 abi.encodeWithSignature(
                     "mint(address,uint256)",
@@ -172,6 +199,8 @@ contract DZapStaking is
                 revert DZapStaking__UnableToCallRewardTokenContract();
 
             emit RewardClaimed(_msgSender(), totalReward);
+        } else {
+            revert();
         }
     }
 
@@ -200,7 +229,10 @@ contract DZapStaking is
 
     /// @notice Allows the owner to update the unbonding period
     /// @param newUnbondingPeriod The new unbonding period
-    function updateUnbondingPeriod(uint48 newUnbondingPeriod) public onlyOwner {
+    function updateUnbondingPeriod(uint256 newUnbondingPeriod)
+        public
+        onlyOwner
+    {
         s_unbondingPeriod = newUnbondingPeriod;
     }
 
@@ -239,19 +271,6 @@ contract DZapStaking is
         onlyOwner
     {}
 
-    /// @dev Updates the reward for a specific NFT
-    /// @param user The address of the user
-    /// @param tokenId The ID of the NFT to update the reward for
-    function _updateReward(address user, uint256 tokenId) internal {
-        if (
-            s_stakes[user][tokenId].stakedAt > 0 &&
-            !s_stakes[user][tokenId].unbonding
-        ) {
-            s_stakes[user][tokenId].rewardDebt = earned(user, tokenId);
-            s_stakes[user][tokenId].stakedAt = uint48(block.number);
-        }
-    }
-
     /// @dev Removes an NFT from the user's staked list
     /// @param user The address of the user
     /// @param tokenId The ID of the NFT to remove
@@ -280,14 +299,14 @@ contract DZapStaking is
         returns (uint256)
     {
         StakeInfo storage stakeInfo = s_stakes[user][tokenId];
-        if (stakeInfo.stakedAt == 0 || stakeInfo.unbonding) {
-            return stakeInfo.rewardDebt;
+        if (stakeInfo.stakedUntil != 0) {
+            return
+                ((uint256(stakeInfo.stakedUntil - stakeInfo.stakedSince)) *
+                    s_rewardRatePerBlock) / 10**18;
         }
         return
-            (uint256((uint48(block.number) - stakeInfo.stakedAt)) *
-                s_rewardRatePerBlock) /
-            10**18 +
-            stakeInfo.rewardDebt;
+            (uint256((uint48(block.number) - stakeInfo.stakedSince)) *
+                s_rewardRatePerBlock) / 10**18;
     }
 
     /// @notice Returns the address of the ERC721 token contract used for staking
@@ -310,13 +329,13 @@ contract DZapStaking is
 
     /// @notice Returns the unbonding period in blocks before an unstaked NFT can be withdrawn
     /// @return The unbonding period in blocks
-    function getUnbondingPeriod() public view returns (uint48) {
+    function getUnbondingPeriod() public view returns (uint256) {
         return s_unbondingPeriod;
     }
 
     /// @notice Returns the delay period in blocks before rewards can be claimed again
     /// @return The reward claim delay period in blocks
-    function getRewardClaimDelay() public view returns (uint48) {
+    function getRewardClaimDelay() public view returns (uint256) {
         return s_rewardClaimDelay;
     }
 
@@ -324,14 +343,22 @@ contract DZapStaking is
     /// @param user The address of the user
     /// @param tokenId The ID of the staked NFT
     /// @return StakeInfo struct containing staking details
-    function getStakeInfo(address user, uint256 tokenId) external view returns (StakeInfo memory) {
+    function getStakeInfo(address user, uint256 tokenId)
+        external
+        view
+        returns (StakeInfo memory)
+    {
         return s_stakes[user][tokenId];
     }
 
     /// @notice Returns a list of staked NFTs for a specific user
     /// @param user The address of the user
     /// @return An array of token IDs representing the user's staked NFTs
-    function getUserStakes(address user) external view returns (uint256[] memory) {
+    function getUserStakes(address user)
+        external
+        view
+        returns (uint256[] memory)
+    {
         return s_userStakes[user];
     }
 }
