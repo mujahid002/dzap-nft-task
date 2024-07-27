@@ -10,9 +10,7 @@ Link: https://amoy.polygonscan.com/address/0x05203d191dda7dba3a3130eb2b3cd85593f
 
 Deploying DZapStaking Contract...
 DZapStaking Contract Address: 0x91Ce856e9eFB78b57002Ff2E88C80b856F893138
-Link:
-Implementation Contract: https://amoy.polygonscan.com/address/0x8edffa01e86b1f039b6c168b7f8813169a662364#code
-Proxy Contract: https://amoy.polygonscan.com/address/0x91Ce856e9eFB78b57002Ff2E88C80b856F893138#code
+Proxy Contract Link: https://amoy.polygonscan.com/address/0x91Ce856e9eFB78b57002Ff2E88C80b856F893138#code
 
 ---
 
@@ -22,8 +20,8 @@ Link: https://amoy.polygonscan.com/address/0xab2233d19dc0e2C48125Fca7A2D72B14Af2
 
 ---
 
-
 ## Flowchart
+
 ![Flowchart](image.png)
 
 1. User(DZap NFT Owner) need to approve DZap-Staking Contract with TokenId(or multiple).
@@ -32,4 +30,4 @@ Link: https://amoy.polygonscan.com/address/0xab2233d19dc0e2C48125Fca7A2D72B14Af2
 4. User can unstake anytime and unbounding period starts(i.e for 1 day), after one day user can withdraw reward tokens(Rewards not generated after unbounding period starts).
 5. After unbounding period user can withdraw their respective NFTs. Upgrade DZap-Staking contract by owner.
 
-### Another Idea: DZap-Staking can be implemented using the reference ERC-4626 (Extended ERC-20, Tokenized vault interface) 
+### Another Idea: DZap-Staking can be implemented using the reference ERC-4626 (Extended ERC-20, Tokenized vault interface)
