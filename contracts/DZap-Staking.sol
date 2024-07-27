@@ -15,6 +15,8 @@ error DZapStaking__NftAlreadyUnStaked();
 error DZapStaking__NftNotUnStaked();
 error DZapStaking__UnbondingPeriodNotOver();
 error DZapStaking__AlreadyRewardsClaimed();
+error DZapStaking__ZeroRewardsToClaim();
+error DZapStaking__ClaimRewardsBeforeWithdraw();
 error DZapStaking__InvalidRewardTokenContract();
 error DZapStaking__UnableToCallRewardTokenContract();
 
@@ -37,14 +39,15 @@ contract DZapStaking is
     /// @notice ERC20 token used for rewards
     address private s_rewardTokenContractAddress;
     /// @notice Unbonding period in blocks before an unstaked NFT can be withdrawn
-    uint256 private s_unbondingPeriod = 86400;
+    uint256 private s_unbondingPeriod;
     /// @notice Delay period in blocks before rewards can be claimed again
-    uint256 private s_rewardClaimDelay = 1200; //i.e 20 minutes
+    uint256 private s_rewardClaimDelay; //i.e 20 minutes
     /// @notice Reward rate in ERC20 tokens per block
-    uint256 private s_rewardRatePerBlock = 10;
+    uint256 private s_rewardRatePerBlock;
 
     /// @notice Struct to store staking information for each NFT
     struct StakeInfo {
+        uint256 stakedBlock;
         uint48 stakedSince;
         uint48 stakedUntil;
     }
@@ -62,14 +65,22 @@ contract DZapStaking is
     event RewardClaimed(address indexed user, uint256 amount);
 
     /// @dev Constructor to disable initializers
-    constructor() {
-        _disableInitializers();
-    }
+    // constructor() {
+    //     _disableInitializers();
+    // }
 
     /// @notice Initializes the contract with the given parameters
     /// @param _stakingTokenContract The ERC721 token that users can stake
-    function initialize(IERC721 _stakingTokenContract) public initializer {
+    function initialize(
+        IERC721 _stakingTokenContract,
+        uint256 _unbondingPeriod,
+        uint256 _rewardClaimDelay,
+        uint256 _rewardRatePerBlock
+    ) public initializer {
         s_stakingTokenContract = _stakingTokenContract;
+        s_unbondingPeriod = _unbondingPeriod;
+        s_rewardClaimDelay = _rewardClaimDelay;
+        s_rewardRatePerBlock = _rewardRatePerBlock;
         __Pausable_init();
         __ReentrancyGuard_init();
         __Ownable_init(_msgSender());
@@ -99,7 +110,8 @@ contract DZapStaking is
             );
 
             s_stakes[_msgSender()][tokenId] = StakeInfo({
-                stakedSince: uint48(block.number),
+                stakedBlock: block.number,
+                stakedSince: uint48(block.timestamp),
                 stakedUntil: 0
             });
 
@@ -125,7 +137,7 @@ contract DZapStaking is
             if (stakeInfo.stakedUntil != 0)
                 revert DZapStaking__NftAlreadyUnStaked();
 
-            stakeInfo.stakedUntil = uint48(block.number);
+            stakeInfo.stakedUntil = uint48(block.timestamp);
             emit Unstaked(_msgSender(), tokenId);
         }
     }
@@ -147,8 +159,11 @@ contract DZapStaking is
                 revert DZapStaking__NftNotUnStaked();
 
             if (
-                uint48(block.number) < stakeInfo.stakedUntil + s_unbondingPeriod
+                uint48(block.timestamp) <
+                stakeInfo.stakedUntil + s_unbondingPeriod
             ) revert DZapStaking__UnbondingPeriodNotOver();
+
+            if (earned(_msgSender(), tokenId) > 0) revert DZapStaking__ClaimRewardsBeforeWithdraw();
 
             delete s_stakes[_msgSender()][tokenId];
             _removeTokenId(_msgSender(), tokenId);
@@ -183,11 +198,11 @@ contract DZapStaking is
                 stakeInfo.stakedSince >= stakeInfo.stakedUntil
             ) revert DZapStaking__AlreadyRewardsClaimed();
             if (
-                uint48(block.number) >=
+                uint48(block.timestamp) >=
                 stakeInfo.stakedSince + s_rewardClaimDelay
             ) {
                 totalReward += earned(_msgSender(), tokenId);
-                stakeInfo.stakedSince = uint48(block.number);
+                stakeInfo.stakedBlock = block.number;
             }
         }
         if (totalReward != 0) {
@@ -203,7 +218,7 @@ contract DZapStaking is
 
             emit RewardClaimed(_msgSender(), totalReward);
         } else {
-            revert();
+            revert DZapStaking__ZeroRewardsToClaim();
         }
     }
 
@@ -302,14 +317,7 @@ contract DZapStaking is
         returns (uint256)
     {
         StakeInfo storage stakeInfo = s_stakes[user][tokenId];
-        if (stakeInfo.stakedUntil != 0) {
-            return
-                ((uint256(stakeInfo.stakedUntil - stakeInfo.stakedSince)) *
-                    s_rewardRatePerBlock) / 10**18;
-        }
-        return
-            (uint256((uint48(block.number) - stakeInfo.stakedSince)) *
-                s_rewardRatePerBlock) / 10**18;
+        return (block.number - stakeInfo.stakedBlock) * s_rewardRatePerBlock;
     }
 
     /// @notice Returns the address of the ERC721 token contract used for staking
