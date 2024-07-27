@@ -20,6 +20,7 @@ async function main() {
     [stakingTokenContractAddress],
     {
       initializer: "initialize",
+      kind: "uups",
     }
   );
   await dZapStaking.deployed();
@@ -98,5 +99,5 @@ main()
   });
 
 // CLI command to deploy all contracts at once
-// yarn hardhat run scripts/DeployAll.js --network polygonAmoy
+// yarn hardhat run scripts/deployAll.js --network polygonAmoy
 // yarn hardhat verify --network polygonAmoy DEPLOYED_CONTRACT_ADDRESS
