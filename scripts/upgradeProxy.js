@@ -1,6 +1,6 @@
 const { ethers, upgrades } = require("hardhat");
 
-const PROXY = "";
+const PROXY = "0x91Ce856e9eFB78b57002Ff2E88C80b856F893138";
 
 async function main() {
   const DZapStakingV2 = await hre.ethers.getContractFactory("DZapStaking");
@@ -10,3 +10,5 @@ async function main() {
 }
 
 main();
+
+// yarn hardhat run scripts/upgradeProxy.js --network polygonAmoy
