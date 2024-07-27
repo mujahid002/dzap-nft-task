@@ -16,6 +16,7 @@ error DZapStaking__NftAlreadyUnStaked();
 error DZapStaking__NftNotUnStaked();
 error DZapStaking__UnbondingPeriodNotOver();
 error DZapStaking__AlreadyRewardsClaimed();
+error DZapStaking__DelayTimeNotExceeded();
 error DZapStaking__ZeroRewardsToClaim();
 error DZapStaking__ClaimRewardsBeforeWithdraw();
 error DZapStaking__InvalidRewardTokenContract();
@@ -143,6 +144,7 @@ contract DZapStaking is
             stakeInfo.stakedUntil = uint48(block.timestamp);
             emit Unstaked(_msgSender(), tokenId);
         }
+        _transferRewards(_msgSender(), tokenIds);
     }
 
     /// @notice Allows users to withdraw NFTs after the unbonding period has passed
@@ -166,7 +168,8 @@ contract DZapStaking is
                 stakeInfo.stakedUntil + s_unbondingPeriod
             ) revert DZapStaking__UnbondingPeriodNotOver();
 
-            if (earned(_msgSender(), tokenId) > 0) revert DZapStaking__ClaimRewardsBeforeWithdraw();
+            if (earned(_msgSender(), tokenId) > 0)
+                revert DZapStaking__ClaimRewardsBeforeWithdraw();
 
             delete s_stakes[_msgSender()][tokenId];
             _removeTokenId(_msgSender(), tokenId);
@@ -196,16 +199,16 @@ contract DZapStaking is
             StakeInfo storage stakeInfo = s_stakes[_msgSender()][tokenId];
             if (stakeInfo.stakedSince <= 0) revert DZapStaking__NftNotStaked();
 
-            if (
-                stakeInfo.stakedUntil != 0 &&
-                stakeInfo.stakedSince >= stakeInfo.stakedUntil
-            ) revert DZapStaking__AlreadyRewardsClaimed();
+            if (stakeInfo.stakedUntil != 0)
+                revert DZapStaking__AlreadyRewardsClaimed();
             if (
                 uint48(block.timestamp) >=
                 stakeInfo.stakedSince + s_rewardClaimDelay
             ) {
                 totalReward += earned(_msgSender(), tokenId);
                 stakeInfo.stakedBlock = block.number;
+            } else {
+                revert DZapStaking__DelayTimeNotExceeded();
             }
         }
         if (totalReward != 0) {
@@ -295,7 +298,7 @@ contract DZapStaking is
     /// @dev Removes an NFT from the user's staked list
     /// @param user The address of the user
     /// @param tokenId The ID of the NFT to remove
-    function _removeTokenId(address user, uint256 tokenId) private {
+    function _removeTokenId(address user, uint256 tokenId) internal {
         uint256 length = s_userStakes[user].length;
         for (uint256 i = 0; i < length; ++i) {
             if (s_userStakes[user][i] == tokenId) {
@@ -303,6 +306,32 @@ contract DZapStaking is
                 s_userStakes[user].pop();
                 break;
             }
+        }
+    }
+
+    function _transferRewards(address user, uint256[] calldata tokenIds)
+        internal
+    {
+        uint256 length = tokenIds.length;
+        uint256 totalReward = 0;
+        for (uint256 i = 0; i < length; ++i) {
+            uint256 tokenId = tokenIds[i];
+
+            StakeInfo storage stakeInfo = s_stakes[user][tokenId];
+            if (stakeInfo.stakedSince <= 0) revert DZapStaking__NftNotStaked();
+        }
+        if (totalReward != 0) {
+            (bool checkMint, ) = s_rewardTokenContractAddress.call(
+                abi.encodeWithSignature(
+                    "mint(address,uint256)",
+                    user,
+                    totalReward
+                )
+            );
+            if (!checkMint)
+                revert DZapStaking__UnableToCallRewardTokenContract();
+
+            emit RewardClaimed(user, totalReward);
         }
     }
 
