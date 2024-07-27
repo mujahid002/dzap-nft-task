@@ -168,9 +168,6 @@ contract DZapStaking is
                 stakeInfo.stakedUntil + s_unbondingPeriod
             ) revert DZapStaking__UnbondingPeriodNotOver();
 
-            if (earned(_msgSender(), tokenId) > 0)
-                revert DZapStaking__ClaimRewardsBeforeWithdraw();
-
             delete s_stakes[_msgSender()][tokenId];
             _removeTokenId(_msgSender(), tokenId);
             s_stakingTokenContract.transferFrom(
